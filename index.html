@@ -273,6 +273,26 @@ footer { font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--lin
   }
 
   // ---------- cleaning ----------
+  /*STRIP-START*/
+  // Some browsers (Safari, iOS) add their own EXIF/text chunks when they write a PNG.
+  // Rebuild the file keeping only the chunks needed to draw the picture.
+  var KEEP = { IHDR: 1, PLTE: 1, tRNS: 1, IDAT: 1, IEND: 1, sRGB: 1, gAMA: 1, cHRM: 1, iCCP: 1, sBIT: 1 };
+  function stripPng(b) {
+    if (!isPng(b)) return b;
+    var dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    var out = new Uint8Array(b.length), o = 8, p = 8;
+    out.set(b.subarray(0, 8), 0);
+    while (p + 12 <= b.length) {
+      var len = dv.getUint32(p), total = len + 12;
+      if (p + total > b.length) break;
+      var type = String.fromCharCode(b[p + 4], b[p + 5], b[p + 6], b[p + 7]);
+      if (KEEP[type]) { out.set(b.subarray(p, p + total), o); o += total; }
+      p += total;
+      if (type === 'IEND') break;
+    }
+    return out.slice(0, o);
+  }
+  /*STRIP-END*/
   function decodeImg(file) {
     return new Promise(function (res, rej) {
       var url = URL.createObjectURL(file), im = new Image();
@@ -321,9 +341,11 @@ footer { font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--lin
       }
       ctx.putImageData(img, 0, 0);
       return new Promise(function (res, rej) {
-        cv.toBlob(function (blob) {
-          if (!blob) return rej(new Error('encode'));
-          readBytes(blob).then(function (out) {
+        cv.toBlob(function (raw) {
+          if (!raw) return rej(new Error('encode'));
+          readBytes(raw).then(function (rawBytes) {
+            var out = stripPng(rawBytes);
+            var blob = new Blob([out], { type: 'image/png' });
             var left = pngMeta(out);
             if (hasStealth(ctx.getImageData(0, 0, w, h))) left.push('알파 채널 숨김 데이터');
             cv.width = cv.height = 0;   // release memory early on phones
